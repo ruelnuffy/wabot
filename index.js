@@ -7,6 +7,9 @@ const qrcode  = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const Database = require('better-sqlite3');
 const cron = require('node-cron');
+const puppeteer = require('puppeteer');
+
+// Removed duplicate client declaration to avoid redeclaration error
 
 
 /* ═══════ 1. SQLite bootstrap ═══════ */

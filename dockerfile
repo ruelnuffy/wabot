@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install Chromium dependencies
+# Install dependencies for puppeteer
 RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
@@ -19,24 +19,21 @@ RUN apt-get update && apt-get install -y \
     libxdamage1 \
     libxrandr2 \
     xdg-utils \
-    libgbm-dev \
-    libxshmfence-dev \
-    libglu1-mesa \
     --no-install-recommends \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy files
+# Copy package.json and install dependencies
 COPY package*.json ./
 RUN npm install
 
+# Copy source code
 COPY . .
 
-# Tell puppeteer to skip downloading Chromium (we use the one in system)
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# Expose port (make sure your app listens on process.env.PORT)
+EXPOSE 8000
 
 # Start the bot
-CMD ["node", "index.js"]
+CMD [ "npm", "start" ]

@@ -63,14 +63,8 @@ const getSymptoms = db.prepare('SELECT symptom,logged_at FROM symptoms WHERE jid
 const addFeedback = db.prepare('INSERT INTO feedback (jid, response1, response2, submitted_at) VALUES (?,?,?,?)');
 
 
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: '/data/waba' }),   // adjust if you mount elsewhere
-  puppeteer: {
-    executablePath: '/usr/bin/chromium-browser',             // set in Dockerfile
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    headless: true
-  }
-});
+/* ═══════ 2.  Bot init ═══════ */
+const client = new Client({ authStrategy: new LocalAuth() });
 
 const CYCLE = 28;
 const mem          = {};                 // chatId → { step , data:{} }

@@ -1,0 +1,13 @@
+# node
+node_modules/
+npm-debug.log*
+
+# WhatsApp session
+session/
+
+# Database
+*.db
+venille.db
+
+# OS / editor
+.DS_Store

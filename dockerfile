@@ -1,42 +1,20 @@
-# use the latest Node 22 slim image
-FROM node:22-bullseye-slim
+FROM node:18-slim
 
-# install Chromium and its dependencies
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-     ca-certificates \
-     fonts-liberation \
-     libasound2 \
-     libatk-bridge2.0-0 \
-     libatk1.0-0 \
-     libcups2 \
-     libgbm1 \
-     libgtk-3-0 \
-     libnss3 \
-     libx11-xcb1 \
-     libxcomposite1 \
-     libxdamage1 \
-     libxrandr2 \
-     libxss1 \
-     libxtst6 \
-     xdg-utils \
-     chromium \
-  && rm -rf /var/lib/apt/lists/*
+# Install Chrome + libs
+RUN apt-get update && apt-get install -y \
+    chromium \
+    libnss3 libxss1 libasound2 libatk1.0-0 libgtk-3-0 libgbm-dev \
+    libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libxtst6 \
+    libxrandr2 libpango-1.0-0 libpangocairo-1.0-0 libxcb1 \
+  --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
-# tell Puppeteer to use the system-installed Chromium
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    # optional: reduce risk of running as root inside container
-    PUPPETEER_RUN_AS_ROOT=true
+# Tell Puppeteer to skip its download and use the system Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-WORKDIR /usr/src/app
-
-# copy package.json and install deps
+WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
-
-# copy the rest of your bot’s code
+RUN npm ci
 COPY . .
 
-# default command
-CMD ["node", "index.js"]
+CMD ["npm", "start"]

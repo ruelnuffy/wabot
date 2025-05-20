@@ -5,7 +5,7 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("🔴 UNHANDLED REJECTION:", reason, {
     message: reason?.message,
     stack: reason?.stack,
-    error: reason?.error,        // in case it’s an ErrorEvent
+    error: reason?.error,        // in case it's an ErrorEvent
     filename: reason?.filename,  // DOM ErrorEvent props
     lineno: reason?.lineno,
     colno: reason?.colno,
@@ -17,11 +17,90 @@ process.on("uncaughtException", (err) => {
 
 const { Client } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
+const qrImage = require("qrcode"); // Add this for web-friendly QR codes
+const express = require("express"); // Add this for web server
 const { createClient } = require("@supabase/supabase-js");
 const SupaAuth = require("./supa-auth");
 const path = require("path");
 const fs = require("fs");
 const cron = require("node-cron");
+
+// ───────── express app setup ─────────
+const app = express();
+const PORT = process.env.PORT || 3000;
+let lastQR = null;
+let isConnected = false;
+
+// Simple QR code endpoint
+app.get('/qr', async (req, res) => {
+  if (!lastQR) {
+    return res.status(404).send('No QR code available. WhatsApp might already be connected.');
+  }
+  
+  // Set proper content type
+  res.setHeader('content-type', 'image/png');
+  
+  // Generate QR code as image and send directly to response
+  await qrImage.toFileStream(res, lastQR);
+});
+
+// HTML page to display QR code with auto-refresh
+app.get('/', (req, res) => {
+  const html = `
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>WhatsApp QR Code</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
+      .container { max-width: 500px; margin: 0 auto; }
+      img { max-width: 100%; height: auto; border: 1px solid #ddd; }
+      .status { margin: 20px 0; padding: 10px; border-radius: 4px; }
+      .connected { background-color: #d4edda; color: #155724; }
+      .waiting { background-color: #fff3cd; color: #856404; }
+    </style>
+    <script>
+      // Auto-refresh the page every 10 seconds if not connected
+      function checkStatus() {
+        fetch('/status')
+          .then(response => response.json())
+          .then(data => {
+            if (data.connected) {
+              document.getElementById('status').className = 'status connected';
+              document.getElementById('status').textContent = 'Connected to WhatsApp!';
+              document.getElementById('qr-container').style.display = 'none';
+            } else {
+              setTimeout(() => { window.location.reload(); }, 10000);
+            }
+          });
+      }
+    </script>
+  </head>
+  <body onload="checkStatus()">
+    <div class="container">
+      <h1>WhatsApp Bot QR Code</h1>
+      <div id="status" class="status waiting">Waiting for connection...</div>
+      <div id="qr-container">
+        <p>Scan this QR code with your WhatsApp app to connect:</p>
+        <img src="/qr" alt="WhatsApp QR Code" id="qr-code">
+        <p><small>The page will automatically refresh until connected.</small></p>
+      </div>
+    </div>
+  </body>
+  </html>
+  `;
+  
+  res.send(html);
+});
+
+// Status endpoint for the frontend to check
+app.get('/status', (req, res) => {
+  res.json({
+    connected: isConnected,
+    hasQR: !!lastQR
+  });
+});
 
 // ───────── supabase client (for session storage) ─────────
 if (!process.env.SUPA_URL || !process.env.SUPA_KEY) {
@@ -50,12 +129,11 @@ function findChromePath() {
 // ───────── main ─────────
 (async function main() {
   try {
-
-
-
-
-
-
+    // Start the express server first
+    app.listen(PORT, () => {
+      console.log(`🌐 Web server running on port ${PORT}`);
+      console.log(`🔗 Access the QR code at: http://localhost:${PORT}`);
+    });
 
     // Generate a unique session identifier for logging purposes
     const sessionId = `session-${Date.now()}`;
@@ -66,7 +144,6 @@ function findChromePath() {
     const client = new Client({
       authStrategy: new SupaAuth({
         tableName: "whatsapp_sessions",
-        // dataPath: sessionBasePath,
       }),
       puppeteer: {
         headless: true,
@@ -104,10 +181,15 @@ function findChromePath() {
     });
 
     client.on('qr', qr => {
-      console.log('🔍 QR Code — scan with your phone:');
+      console.log('🔍 QR Code received — visit the web interface to scan it');
+      // Store the QR code for the web endpoint
+      lastQR = qr;
+      
+      // Still show in terminal for local development
       qrcode.generate(qr, { small: true });
+      
       try {
-        // Use /tmp for QR file as well
+        // Still save to file as backup
         fs.writeFileSync(path.resolve('/tmp','last-qr.txt'), qr);
         console.log('💾 QR saved to /tmp/last-qr.txt');
       } catch(e) {
@@ -117,6 +199,9 @@ function findChromePath() {
 
     client.on('authenticated', async session => {
       console.log('✅ Authenticated! Session upserting to Supabase…');
+      isConnected = true;
+      lastQR = null; // Clear QR code after authentication
+      
       try {
         await supabase
           .from('whatsapp_sessions')
@@ -129,23 +214,28 @@ function findChromePath() {
 
     client.on('ready', () => {
       console.log('🎉 WhatsApp is ready!');
+      isConnected = true;
+      lastQR = null; // Ensure QR is cleared
       // remove any lingering QR file
       try { fs.unlinkSync('/tmp/last-qr.txt'); } catch {}
     });
 
     client.on('auth_failure', e => {
       console.error('⚠️ Auth failure:', e);
+      isConnected = false;
       // Don't auto-restart on auth failure, let user handle it
     });
 
     client.on('disconnected', reason => {
       console.warn('⚠️ Disconnected:', reason);
+      isConnected = false;
+      
       // Only restart for certain disconnect reasons
       if (reason !== 'LOGOUT') {
         setTimeout(() => {
           console.log('🔄 Reinitializing after disconnect…');
           client.initialize();
-        }, 5_000);
+        }, 5000);
       }
     });
 
@@ -156,7 +246,7 @@ function findChromePath() {
         setTimeout(() => {
           console.log('🔄 Reinitializing after error…');
           client.initialize();
-        }, 10_000);
+        }, 10000);
       }
     });
 
@@ -183,6 +273,11 @@ function findChromePath() {
 
     console.log('🚀 Initializing client…');
     await client.initialize();
+  } catch (error) {
+    console.error('🔥 Fatal error in main:', error);
+    process.exit(1);
+  }
+})();
 
     /* ---------- helpers (dates, strings, etc) ---------- */
     const CYCLE = 28;

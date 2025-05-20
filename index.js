@@ -126,7 +126,239 @@ function findChromePath() {
   return null;
 }
 
-// ───────── main ─────────
+// ───────── helpers (dates, strings, etc) ───────────
+const CYCLE = 28;
+const fmt = (d) => d.toLocaleDateString("en-GB");
+const addD = (d, n) => {
+  const c = new Date(d);
+  c.setDate(c.getDate() + n);
+  return c;
+};
+const norm = (s) =>
+  (s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+const mem = {}; // chat‑state (id → { step, data })
+
+function st(id) {
+  return (mem[id] ??= { step: null, data: {} });
+}
+function format(str, ...a) {
+  return str.replace(/{(\d+)}/g, (_, i) => a[i] ?? _);
+}
+
+// ---------- i18n strings (unchanged, shortened for brevity) ----------
+const STRINGS = {
+  English: {
+    menu: `Hi, I'm *Venille AI*, your private menstrual & sexual-health companion.
+
+Reply with the *number* **or** the *words*:
+
+1️⃣  Track my period
+2️⃣  Log symptoms
+3️⃣  Learn about sexual health
+4️⃣  Order Venille Pads
+5️⃣  View my cycle
+6️⃣  View my symptoms
+7️⃣  Change language
+8️⃣  Give feedback / report a problem`,
+
+    fallback:
+      "Sorry, I didn't get that.\nType *menu* to see what I can do.",
+    trackPrompt: "🩸 When did your last period start? (e.g. 12/05/2025)",
+    langPrompt: "Type your preferred language (e.g. English, Hausa…)",
+    savedSymptom: "Saved ✔︎ — send another, or type *done*.",
+    askReminder:
+      "✅ Saved! Your next period is likely around *{0}*.\nWould you like a reminder? (yes / no)",
+    reminderYes: "🔔 Reminder noted! I'll message you a few days before.",
+    reminderNo: "👍 No problem – ask me any time.",
+    invalidDate: "🙈 Please type the date like *12/05/2025*",
+    notValidDate: "🤔 That doesn't look like a valid date.",
+    symptomsDone: "✅ {0} symptom{1} saved. Feel better soon ❤️",
+    symptomsCancel: "🚫 Cancelled.",
+    symptomsNothingSaved: "Okay, nothing saved.",
+    symptomPrompt:
+      "How are you feeling? Send one symptom at a time.\nWhen done, type *done* (or *cancel*).",
+    eduTopics: `What topic?
+
+1️⃣  STIs  
+2️⃣  Contraceptives  
+3️⃣  Consent  
+4️⃣  Hygiene during menstruation  
+5️⃣  Myths and Facts`,
+    languageSet: "🔤 Language set to *{0}*.",
+    noPeriod: "No period date recorded yet.",
+    cycleInfo: `📅 *Your cycle info:*  
+• Last period: *{0}*  
+• Predicted next: *{1}*`,
+    noSymptoms: "No symptoms logged yet.",
+    symptomsHistory: "*Your symptom history (last 5):*\n{0}",
+    feedbackQ1:
+      "Did you have access to sanitary pads this month?\n1. Yes   2. No",
+    feedbackQ2: 'Thanks. What challenges did you face? (or type "skip")',
+    feedbackThanks: "❤️  Feedback noted — thank you!",
+    orderQuantityPrompt:
+      "How many packs of *Venille Pads* would you like to order?",
+    orderQuantityInvalid:
+      "Please enter a *number* between 1 and 99, e.g. 3",
+    orderConfirmation: `✅ Your order for *{0} pack{1}* has been forwarded.
+
+Tap the link below to chat directly with our sales team and confirm delivery:
+{2}
+
+Thank you for choosing Venille!`,
+    orderVendorMessage: `🆕 *Venille Pads order*
+
+From : {0}
+JID  : {1}
+Qty  : {2} pack{3}
+
+(Please contact the customer to arrange delivery.)`,
+  },
+
+  Hausa: {
+    menu: `Sannu, ni ce *Venille AI*, abokiyar lafiyar jinin haila da dangantakar jima'i.
+
+Zaɓi daga cikin waɗannan:
+
+1️⃣  Bi jinin haila
+2️⃣  Rubuta alamomin rashin lafiya
+3️⃣  Koyi game da lafiyar jima'i
+4️⃣  Yi odar Venille Pads
+5️⃣  Duba zagayen haila
+6️⃣  Duba alamun rashin lafiya
+7️⃣  Sauya harshe
+8️⃣  Bayar da ra'ayi / rahoto matsala`,
+
+    fallback:
+      "Yi hakuri, ban gane ba.\nRubuta *menu* don ganin abin da zan iya yi.",
+    trackPrompt:
+      "🩸 Yaushe ne lokacin farkon jinin haila na ƙarshe? (e.g. 12/05/2025)",
+    langPrompt: "Rubuta harshen da kake so (misali: English, Hausa…)",
+    savedSymptom: "An ajiye ✔︎ — aika wani ko rubuta *done*.",
+    askReminder:
+      "✅ An ajiye! Ana sa ran haila na gaba ne kusa da *{0}*.\nKana son aiko maka da tunatarwa? (ee / a'a)",
+    reminderYes:
+      "🔔 Tunatarwa ta samu! Zan aiko maka saƙo 'yan kwanakin kafin.",
+    reminderNo: "👍 Babu damuwa - tambayi ni a kowane lokaci.",
+    invalidDate: "🙈 Da fatan za a rubuta kwanan wata kamar *12/05/2025*",
+    notValidDate: "🤔 Wannan bai yi kama da kwanan wata mai kyau ba.",
+    symptomsDone: "✅ An ajiye alama {0}{1}. Da fatan kawo maki sauki ❤️",
+    symptomsCancel: "🚫 An soke.",
+    symptomsNothingSaved: "To, ba a adana komai ba.",
+    symptomPrompt:
+      "Yaya jikin ki? Aika alama guda ɗaya a kowane lokaci.\nIn an gama, rubuta *done* (ko *cancel*).",
+    eduTopics: `Wane batun?
+
+1️⃣  Cutar STIs  
+2️⃣  Hanyoyin Dakile Haihuwa  
+3️⃣  Yarda  
+4️⃣  Tsabta yayin jinin haila  
+5️⃣  Karin Magana da Gaskiya`,
+    languageSet: "🔤 An saita harshe zuwa *{0}*.",
+    noPeriod: "Ba a yi rijistar kwanan haila ba har yanzu.",
+    cycleInfo: `📅 *Bayanin zagayen haila:*  
+• Haila na ƙarshe: *{0}*  
+• Ana hasashen na gaba: *{1}*`,
+    noSymptoms: "Ba a rubuta alamun rashin lafiya ba har yanzu.",
+    symptomsHistory:
+      "*Tarihin alamun rashin lafiyarki (na ƙarshe 5):*\n{0}",
+    feedbackQ1:
+      "Shin kun samu damar samun sanitary pads a wannan watan?\n1. Ee   2. A'a",
+    feedbackQ2:
+      'Na gode. Wane irin kalubale kuka fuskanta? (ko rubuta "skip")',
+    feedbackThanks: "❤️  An lura da ra'ayin ku - na gode!",
+    orderQuantityPrompt: "Kwunnan *Venille Pads* nawa kuke son siyan?",
+    orderQuantityInvalid:
+      "Da fatan a shigar da *lambar* tsakanin 1 da 99, misali 3",
+    orderConfirmation: `✅ An aika odar ku ta *kwunan {0}{1}*.
+
+Danna wannan hanyar don tattaunawa kai tsaye da ma\'aikatan sayarwarmu don tabbatar da isar:
+{2}
+
+Mun gode da zaɓen Venille!`,
+    orderVendorMessage: `🆕 *Odar Venille Pads*
+
+Daga : {0}
+JID  : {1}
+Adadi: {2} kwunan{3}
+
+(Da fatan a tuntuɓi masoyi don shirya isar da shi.)`,
+  },
+  // Add more languages here as needed
+};
+
+// ---------- Supabase data helpers (all async) ----------
+async function getUser(jid) {
+  const { data } = await supabase
+    .from("users")
+    .select("*")
+    .eq("jid", jid)
+    .single();
+  return data;
+}
+async function upsertUser(jid, wa_name) {
+  const now = new Date().toISOString();
+  const row = await getUser(jid);
+  if (row) {
+    await supabase
+      .from("users")
+      .update({ wa_name, last_seen: now })
+      .eq("jid", jid);
+  } else {
+    await supabase
+      .from("users")
+      .insert([{ jid, wa_name, first_seen: now, last_seen: now }]);
+  }
+}
+const UserUpdate = {
+  lang: (jid, language) =>
+    supabase.from("users").update({ language }).eq("jid", jid),
+  period: (jid, last, next) =>
+    supabase
+      .from("users")
+      .update({ last_period: last, next_period: next })
+      .eq("jid", jid),
+  reminder: (jid, wants) =>
+    supabase.from("users").update({ wants_reminder: wants }).eq("jid", jid),
+};
+const Symptom = {
+  add: (jid, sym) =>
+    supabase.from("symptoms").insert([{ jid, symptom: sym }]),
+  list: (jid) =>
+    supabase
+      .from("symptoms")
+      .select("symptom,logged_at")
+      .eq("jid", jid)
+      .order("logged_at", { ascending: false }),
+};
+const Feedback = {
+  add: (jid, r1, r2) =>
+    supabase
+      .from("feedback")
+      .insert([{ jid, response1: r1, response2: r2 }]),
+};
+
+// ---------- language helpers ----------
+function getUserLangCache(jid) {
+  return mem[jid]?.langCache || "English";
+}
+async function refreshLangCache(jid) {
+  const u = await getUser(jid);
+  mem[jid] = mem[jid] || {};
+  mem[jid].langCache = u?.language || "English";
+}
+
+async function safeSend(id, text) {
+  try {
+    await client.sendMessage(id, text);
+  } catch (e) {
+    console.warn("[send fail]", e.message);
+  }
+}
+
+// ───────── main function ─────────
 (async function main() {
   try {
     // Start the express server first
@@ -273,252 +505,6 @@ function findChromePath() {
 
     console.log('🚀 Initializing client…');
     await client.initialize();
-  } catch (error) {
-    console.error('🔥 Fatal error in main:', error);
-    process.exit(1);
-  }
-
-    /* ---------- helpers (dates, strings, etc) ---------- */
-    const CYCLE = 28;
-    const fmt = (d) => d.toLocaleDateString("en-GB");
-    const addD = (d, n) => {
-      const c = new Date(d);
-      c.setDate(c.getDate() + n);
-      return c;
-    };
-    const norm = (s) =>
-      (s || "")
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "");
-    const mem = {}; // chat‑state (id → { step, data })
-
-    function st(id) {
-      return (mem[id] ??= { step: null, data: {} });
-    }
-    function format(str, ...a) {
-      return str.replace(/{(\d+)}/g, (_, i) => a[i] ?? _);
-    }
-
-    // ---------- i18n strings (unchanged, shortened for brevity) ----------
-    const STRINGS = {
-      English: {
-        menu: `Hi, I'm *Venille AI*, your private menstrual & sexual-health companion.
-
-Reply with the *number* **or** the *words*:
-
-1️⃣  Track my period
-2️⃣  Log symptoms
-3️⃣  Learn about sexual health
-4️⃣  Order Venille Pads
-5️⃣  View my cycle
-6️⃣  View my symptoms
-7️⃣  Change language
-8️⃣  Give feedback / report a problem`,
-
-        fallback:
-          "Sorry, I didn't get that.\nType *menu* to see what I can do.",
-        trackPrompt: "🩸 When did your last period start? (e.g. 12/05/2025)",
-        langPrompt: "Type your preferred language (e.g. English, Hausa…)",
-        savedSymptom: "Saved ✔︎ — send another, or type *done*.",
-        askReminder:
-          "✅ Saved! Your next period is likely around *{0}*.\nWould you like a reminder? (yes / no)",
-        reminderYes: "🔔 Reminder noted! I'll message you a few days before.",
-        reminderNo: "👍 No problem – ask me any time.",
-        invalidDate: "🙈 Please type the date like *12/05/2025*",
-        notValidDate: "🤔 That doesn't look like a valid date.",
-        symptomsDone: "✅ {0} symptom{1} saved. Feel better soon ❤️",
-        symptomsCancel: "🚫 Cancelled.",
-        symptomsNothingSaved: "Okay, nothing saved.",
-        symptomPrompt:
-          "How are you feeling? Send one symptom at a time.\nWhen done, type *done* (or *cancel*).",
-        eduTopics: `What topic?
-
-1️⃣  STIs  
-2️⃣  Contraceptives  
-3️⃣  Consent  
-4️⃣  Hygiene during menstruation  
-5️⃣  Myths and Facts`,
-        languageSet: "🔤 Language set to *{0}*.",
-        noPeriod: "No period date recorded yet.",
-        cycleInfo: `📅 *Your cycle info:*  
-• Last period: *{0}*  
-• Predicted next: *{1}*`,
-        noSymptoms: "No symptoms logged yet.",
-        symptomsHistory: "*Your symptom history (last 5):*\n{0}",
-        feedbackQ1:
-          "Did you have access to sanitary pads this month?\n1. Yes   2. No",
-        feedbackQ2: 'Thanks. What challenges did you face? (or type "skip")',
-        feedbackThanks: "❤️  Feedback noted — thank you!",
-        orderQuantityPrompt:
-          "How many packs of *Venille Pads* would you like to order?",
-        orderQuantityInvalid:
-          "Please enter a *number* between 1 and 99, e.g. 3",
-        orderConfirmation: `✅ Your order for *{0} pack{1}* has been forwarded.
-
-Tap the link below to chat directly with our sales team and confirm delivery:
-{2}
-
-Thank you for choosing Venille!`,
-        orderVendorMessage: `🆕 *Venille Pads order*
-
-From : {0}
-JID  : {1}
-Qty  : {2} pack{3}
-
-(Please contact the customer to arrange delivery.)`,
-      },
-
-      Hausa: {
-        menu: `Sannu, ni ce *Venille AI*, abokiyar lafiyar jinin haila da dangantakar jima'i.
-
-Zaɓi daga cikin waɗannan:
-
-1️⃣  Bi jinin haila
-2️⃣  Rubuta alamomin rashin lafiya
-3️⃣  Koyi game da lafiyar jima'i
-4️⃣  Yi odar Venille Pads
-5️⃣  Duba zagayen haila
-6️⃣  Duba alamun rashin lafiya
-7️⃣  Sauya harshe
-8️⃣  Bayar da ra'ayi / rahoto matsala`,
-
-        fallback:
-          "Yi hakuri, ban gane ba.\nRubuta *menu* don ganin abin da zan iya yi.",
-        trackPrompt:
-          "🩸 Yaushe ne lokacin farkon jinin haila na ƙarshe? (e.g. 12/05/2025)",
-        langPrompt: "Rubuta harshen da kake so (misali: English, Hausa…)",
-        savedSymptom: "An ajiye ✔︎ — aika wani ko rubuta *done*.",
-        askReminder:
-          "✅ An ajiye! Ana sa ran haila na gaba ne kusa da *{0}*.\nKana son aiko maka da tunatarwa? (ee / a'a)",
-        reminderYes:
-          "🔔 Tunatarwa ta samu! Zan aiko maka saƙo 'yan kwanakin kafin.",
-        reminderNo: "👍 Babu damuwa - tambayi ni a kowane lokaci.",
-        invalidDate: "🙈 Da fatan za a rubuta kwanan wata kamar *12/05/2025*",
-        notValidDate: "🤔 Wannan bai yi kama da kwanan wata mai kyau ba.",
-        symptomsDone: "✅ An ajiye alama {0}{1}. Da fatan kawo maki sauki ❤️",
-        symptomsCancel: "🚫 An soke.",
-        symptomsNothingSaved: "To, ba a adana komai ba.",
-        symptomPrompt:
-          "Yaya jikin ki? Aika alama guda ɗaya a kowane lokaci.\nIn an gama, rubuta *done* (ko *cancel*).",
-        eduTopics: `Wane batun?
-
-1️⃣  Cutar STIs  
-2️⃣  Hanyoyin Dakile Haihuwa  
-3️⃣  Yarda  
-4️⃣  Tsabta yayin jinin haila  
-5️⃣  Karin Magana da Gaskiya`,
-        languageSet: "🔤 An saita harshe zuwa *{0}*.",
-        noPeriod: "Ba a yi rijistar kwanan haila ba har yanzu.",
-        cycleInfo: `📅 *Bayanin zagayen haila:*  
-• Haila na ƙarshe: *{0}*  
-• Ana hasashen na gaba: *{1}*`,
-        noSymptoms: "Ba a rubuta alamun rashin lafiya ba har yanzu.",
-        symptomsHistory:
-          "*Tarihin alamun rashin lafiyarki (na ƙarshe 5):*\n{0}",
-        feedbackQ1:
-          "Shin kun samu damar samun sanitary pads a wannan watan?\n1. Ee   2. A'a",
-        feedbackQ2:
-          'Na gode. Wane irin kalubale kuka fuskanta? (ko rubuta "skip")',
-        feedbackThanks: "❤️  An lura da ra'ayin ku - na gode!",
-        orderQuantityPrompt: "Kwunnan *Venille Pads* nawa kuke son siyan?",
-        orderQuantityInvalid:
-          "Da fatan a shigar da *lambar* tsakanin 1 da 99, misali 3",
-        orderConfirmation: `✅ An aika odar ku ta *kwunan {0}{1}*.
-
-Danna wannan hanyar don tattaunawa kai tsaye da ma\'aikatan sayarwarmu don tabbatar da isar:
-{2}
-
-Mun gode da zaɓen Venille!`,
-        orderVendorMessage: `🆕 *Odar Venille Pads*
-
-Daga : {0}
-JID  : {1}
-Adadi: {2} kwunan{3}
-
-(Da fatan a tuntuɓi masoyi don shirya isar da shi.)`,
-      },
-      // Add more languages here as needed
-    };
-
-    function str(jid, key, ...a) {
-      const lang = getUserLangCache(jid);
-      const bloc = STRINGS[lang] || STRINGS.English || {};
-      const tmpl =
-        bloc[key] || // try user's language
-        STRINGS.English?.[key] || // then English
-        ""; // finally empty string
-      return format(tmpl, ...a);
-    }
-
-    // ---------- Supabase data helpers (all async) ----------
-    async function getUser(jid) {
-      const { data } = await supabase
-        .from("users")
-        .select("*")
-        .eq("jid", jid)
-        .single();
-      return data;
-    }
-    async function upsertUser(jid, wa_name) {
-      const now = new Date().toISOString();
-      const row = await getUser(jid);
-      if (row) {
-        await supabase
-          .from("users")
-          .update({ wa_name, last_seen: now })
-          .eq("jid", jid);
-      } else {
-        await supabase
-          .from("users")
-          .insert([{ jid, wa_name, first_seen: now, last_seen: now }]);
-      }
-    }
-    const UserUpdate = {
-      lang: (jid, language) =>
-        supabase.from("users").update({ language }).eq("jid", jid),
-      period: (jid, last, next) =>
-        supabase
-          .from("users")
-          .update({ last_period: last, next_period: next })
-          .eq("jid", jid),
-      reminder: (jid, wants) =>
-        supabase.from("users").update({ wants_reminder: wants }).eq("jid", jid),
-    };
-    const Symptom = {
-      add: (jid, sym) =>
-        supabase.from("symptoms").insert([{ jid, symptom: sym }]),
-      list: (jid) =>
-        supabase
-          .from("symptoms")
-          .select("symptom,logged_at")
-          .eq("jid", jid)
-          .order("logged_at", { ascending: false }),
-    };
-    const Feedback = {
-      add: (jid, r1, r2) =>
-        supabase
-          .from("feedback")
-          .insert([{ jid, response1: r1, response2: r2 }]),
-    };
-
-    // ---------- language helpers ----------
-    function getUserLangCache(jid) {
-      return mem[jid]?.langCache || "English";
-    }
-    async function refreshLangCache(jid) {
-      const u = await getUser(jid);
-      mem[jid] = mem[jid] || {};
-      mem[jid].langCache = u?.language || "English";
-    }
-
-    async function safeSend(id, text) {
-      try {
-        await client.sendMessage(id, text);
-      } catch (e) {
-        console.warn("[send fail]", e.message);
-      }
-    }
 
     // ---------- message handler ----------
     client.on("message", async (m) => {

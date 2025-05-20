@@ -30,27 +30,45 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 let lastQR = null;
 let isConnected = false;
+// Create a global client instance so it's accessible throughout the app
+let client = null;
+
+// Add middleware for logging requests - helpful for debugging
+app.use((req, res, next) => {
+  console.log(`📝 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 
 // Simple QR code endpoint
 app.get('/qr', async (req, res) => {
+  console.log("QR endpoint accessed, lastQR:", lastQR ? "Available" : "Not available");
+  
   if (!lastQR) {
-    return res.status(404).send('No QR code available. WhatsApp might already be connected.');
+    return res.status(404).send('No QR code available. WhatsApp might already be connected or still initializing.');
   }
   
-  // Set proper content type
-  res.setHeader('content-type', 'image/png');
-  
-  // Generate QR code as image and send directly to response
-  await qrImage.toFileStream(res, lastQR);
+  try {
+    // Set proper content type
+    res.setHeader('content-type', 'image/png');
+    
+    // Generate QR code as image and send directly to response
+    await qrImage.toFileStream(res, lastQR);
+    console.log("QR code image generated and sent successfully");
+  } catch (error) {
+    console.error("Failed to generate QR image:", error);
+    res.status(500).send('Failed to generate QR code');
+  }
 });
 
 // HTML page to display QR code with auto-refresh
 app.get('/', (req, res) => {
+  console.log("Home page accessed, connection status:", isConnected ? "Connected" : "Not connected");
+
   const html = `
   <!DOCTYPE html>
   <html>
   <head>
-    <title>WhatsApp QR Code</title>
+    <title>WhatsApp Bot QR Code</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
       body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
@@ -59,32 +77,55 @@ app.get('/', (req, res) => {
       .status { margin: 20px 0; padding: 10px; border-radius: 4px; }
       .connected { background-color: #d4edda; color: #155724; }
       .waiting { background-color: #fff3cd; color: #856404; }
+      .qr-container { padding: 20px; border: 1px solid #eee; border-radius: 8px; margin-top: 20px; }
     </style>
     <script>
-      // Auto-refresh the page every 10 seconds if not connected
+      // Auto-refresh the QR image every 30 seconds if not connected
       function checkStatus() {
         fetch('/status')
           .then(response => response.json())
           .then(data => {
+            document.getElementById('status-text').textContent = data.connected ? 
+              'Connected to WhatsApp!' : 
+              'Waiting for connection... (page refreshes automatically)';
+            
+            document.getElementById('status').className = data.connected ? 
+              'status connected' : 
+              'status waiting';
+            
             if (data.connected) {
-              document.getElementById('status').className = 'status connected';
-              document.getElementById('status').textContent = 'Connected to WhatsApp!';
               document.getElementById('qr-container').style.display = 'none';
             } else {
-              setTimeout(() => { window.location.reload(); }, 10000);
+              document.getElementById('qr-container').style.display = 'block';
+              // Force reload the image to get fresh QR code
+              const img = document.getElementById('qr-code');
+              img.src = '/qr?' + new Date().getTime();
+              
+              // Refresh whole page after 30 seconds if not connected
+              setTimeout(() => { window.location.reload(); }, 30000);
             }
+          })
+          .catch(error => {
+            console.error('Error checking status:', error);
+            // In case of error, try again in 10 seconds
+            setTimeout(checkStatus, 10000);
           });
       }
+      
+      // Run immediately on load
+      window.onload = checkStatus;
     </script>
   </head>
-  <body onload="checkStatus()">
+  <body>
     <div class="container">
-      <h1>WhatsApp Bot QR Code</h1>
-      <div id="status" class="status waiting">Waiting for connection...</div>
-      <div id="qr-container">
+      <h1>Venille WhatsApp Bot</h1>
+      <div id="status" class="status waiting">
+        <p id="status-text">Checking connection status...</p>
+      </div>
+      <div id="qr-container" class="qr-container">
         <p>Scan this QR code with your WhatsApp app to connect:</p>
         <img src="/qr" alt="WhatsApp QR Code" id="qr-code">
-        <p><small>The page will automatically refresh until connected.</small></p>
+        <p><small>This page will refresh automatically every 30 seconds until connected.</small></p>
       </div>
     </div>
   </body>
@@ -96,10 +137,19 @@ app.get('/', (req, res) => {
 
 // Status endpoint for the frontend to check
 app.get('/status', (req, res) => {
-  res.json({
+  const status = {
     connected: isConnected,
-    hasQR: !!lastQR
-  });
+    hasQR: !!lastQR,
+    timestamp: new Date().toISOString()
+  };
+  
+  console.log("Status endpoint accessed:", status);
+  res.json(status);
+});
+
+// Add health check endpoint that Railway might use
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
 });
 
 // ───────── supabase client (for session storage) ─────────

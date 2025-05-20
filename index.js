@@ -277,7 +277,6 @@ function findChromePath() {
     console.error('🔥 Fatal error in main:', error);
     process.exit(1);
   }
-})();
 
     /* ---------- helpers (dates, strings, etc) ---------- */
     const CYCLE = 28;

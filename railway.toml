@@ -1,6 +1,7 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm ci --omit=dev"
+# Use a more reliable installation command
+buildCommand = "npm cache clean --force && npm install --no-fund --no-audit --omit=dev"
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

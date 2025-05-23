@@ -462,22 +462,106 @@ async function safeSend(id, text) {
       },
     });
 
-    client.on('qr', qr => {
-      console.log('🔍 QR Code received — visit the web interface to scan it');
-      // Store the QR code for the web endpoint
-      lastQR = qr;
-      
-      // Still show in terminal for local development
-      qrcode.generate(qr, { small: true });
-      
-      try {
-        // Still save to file as backup
-        fs.writeFileSync(path.resolve('/tmp','last-qr.txt'), qr);
-        console.log('💾 QR saved to /tmp/last-qr.txt');
-      } catch(e) {
-        console.warn('Could not save QR:', e.message);
+   client.on('qr', async qr => {
+  console.log('🔍 WhatsApp Authentication Required');
+  console.log('='.repeat(60));
+  
+  lastQR = qr; // Store for web endpoint
+  
+  try {
+    // Generate a simple block-style QR code that displays well in Railway logs
+    const QRCode = require('qrcode');
+    
+    // Generate QR as a simple string using UTF-8 blocks
+    const qrString = await QRCode.toString(qr, {
+      type: 'utf8',
+      width: 60,
+      margin: 2,
+      color: {
+        dark: '██',  // Full block
+        light: '  '  // Double space
       }
     });
+    
+    console.log('📱 SCAN WITH WHATSAPP:');
+    console.log('');
+    console.log(qrString);
+    console.log('');
+    
+  } catch (error) {
+    console.error('Failed to generate terminal QR code:', error);
+    
+    // Fallback: Display a simple ASCII grid
+    console.log('📱 QR Code (fallback view):');
+    console.log('┌' + '─'.repeat(50) + '┐');
+    console.log('│' + ' '.repeat(16) + 'QR CODE HERE' + ' '.repeat(22) + '│');
+    console.log('│' + ' '.repeat(10) + 'Visit web interface for QR' + ' '.repeat(13) + '│');
+    console.log('└' + '─'.repeat(50) + '┘');
+  }
+  
+  // Always show web interface info
+  console.log('🌐 Better viewing options:');
+  console.log(`   • Web interface: https://your-app.railway.app/`);
+  console.log(`   • Direct QR image: https://your-app.railway.app/qr`);
+  console.log('');
+  console.log('📋 Raw QR data (backup):');
+  console.log(qr);
+  console.log('='.repeat(60));
+  
+  try {
+    fs.writeFileSync(path.resolve('/tmp','last-qr.txt'), qr);
+    console.log('💾 QR data saved to /tmp/last-qr.txt');
+  } catch(e) {
+    console.warn('Could not save QR:', e.message);
+  }
+});
+
+// Alternative: Even simpler block-based QR for Railway
+client.on('qr', async qr => {
+  console.log('🔍 WhatsApp Authentication Required');
+  console.log('='.repeat(50));
+  
+  lastQR = qr; // Store for web endpoint
+  
+  try {
+    // Use qrcode-terminal with specific settings for Railway
+    const qrcode = require('qrcode-terminal');
+    
+    console.log('📱 SCAN THIS QR CODE WITH WHATSAPP:');
+    console.log('');
+    
+    // Generate with specific options for better Railway display
+    qrcode.generate(qr, {
+      small: true,
+      errorCorrectionLevel: 'M'
+    }, function(qrString) {
+      // Clean up the QR string for better Railway display
+      const cleanedQR = qrString
+        .split('\n')
+        .map(line => line.replace(/\s+$/, '')) // Remove trailing spaces
+        .join('\n');
+      
+      console.log(cleanedQR);
+    });
+    
+    console.log('');
+    
+  } catch (error) {
+    console.error('Failed to generate QR code:', error);
+  }
+  
+  console.log('🌐 Alternative viewing options:');
+  console.log(`   • Web interface: https://your-app.railway.app/`);
+  console.log(`   • Direct QR: https://your-app.railway.app/qr`);
+  console.log('='.repeat(50));
+  
+  try {
+    fs.writeFileSync(path.resolve('/tmp','last-qr.txt'), qr);
+    console.log('💾 QR saved to /tmp/last-qr.txt');
+  } catch(e) {
+    console.warn('Could not save QR:', e.message);
+  }
+});
 
     client.on('authenticated', async session => {
       console.log('✅ Authenticated! Session upserting to Supabase…');

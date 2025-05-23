@@ -626,8 +626,8 @@ async function safeSend(id, text) {
       width: 60,
       margin: 2,
       color: {
-        dark: '██',  // Full block
-        light: '  '  // Double space
+ dark: '#000000', // black blocks
+    light: '#FFFFFF' // white spaces
       }
     });
     

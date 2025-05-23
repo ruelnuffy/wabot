@@ -33,6 +33,19 @@ let isConnected = false;
 // Create a global client instance so it's accessible throughout the app
 let client = null;
 
+// Get the base URL for Railway or local development
+const getBaseUrl = () => {
+  // Railway provides RAILWAY_STATIC_URL or we can construct it
+  if (process.env.RAILWAY_STATIC_URL) {
+    return process.env.RAILWAY_STATIC_URL;
+  }
+  if (process.env.RAILWAY_PROJECT_NAME) {
+    return `https://${process.env.RAILWAY_PROJECT_NAME}.railway.app`;
+  }
+  // For local development
+  return `http://localhost:${PORT}`;
+};
+
 // Add middleware for logging requests - helpful for debugging
 app.use((req, res, next) => {
   console.log(`📝 ${new Date().toISOString()} - ${req.method} ${req.url}`);
@@ -52,7 +65,14 @@ app.get('/qr', async (req, res) => {
     res.setHeader('content-type', 'image/png');
     
     // Generate QR code as image and send directly to response
-    await qrImage.toFileStream(res, lastQR);
+    await qrImage.toFileStream(res, lastQR, {
+      width: 300,
+      margin: 4,
+      color: {
+        dark: '#000000',
+        light: '#FFFFFF'
+      }
+    });
     console.log("QR code image generated and sent successfully");
   } catch (error) {
     console.error("Failed to generate QR image:", error);
@@ -63,6 +83,7 @@ app.get('/qr', async (req, res) => {
 // HTML page to display QR code with auto-refresh
 app.get('/', (req, res) => {
   console.log("Home page accessed, connection status:", isConnected ? "Connected" : "Not connected");
+  const baseUrl = getBaseUrl();
 
   const html = `
   <!DOCTYPE html>
@@ -70,62 +91,177 @@ app.get('/', (req, res) => {
   <head>
     <title>WhatsApp Bot QR Code</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="30">
     <style>
-      body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 20px; }
-      .container { max-width: 500px; margin: 0 auto; }
-      img { max-width: 100%; height: auto; border: 1px solid #ddd; }
-      .status { margin: 20px 0; padding: 10px; border-radius: 4px; }
-      .connected { background-color: #d4edda; color: #155724; }
-      .waiting { background-color: #fff3cd; color: #856404; }
-      .qr-container { padding: 20px; border: 1px solid #eee; border-radius: 8px; margin-top: 20px; }
+      body { 
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+        text-align: center; 
+        margin: 0; 
+        padding: 20px; 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        color: white;
+      }
+      .container { 
+        max-width: 500px; 
+        margin: 0 auto; 
+        background: rgba(255,255,255,0.1);
+        backdrop-filter: blur(10px);
+        border-radius: 20px;
+        padding: 30px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      }
+      .logo {
+        font-size: 2rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+      }
+      .subtitle {
+        opacity: 0.8;
+        margin-bottom: 30px;
+      }
+      img { 
+        max-width: 100%; 
+        height: auto; 
+        border-radius: 15px;
+        background: white;
+        padding: 20px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      }
+      .status { 
+        margin: 20px 0; 
+        padding: 15px; 
+        border-radius: 12px; 
+        font-weight: 500;
+      }
+      .connected { 
+        background-color: rgba(76, 175, 80, 0.2); 
+        border: 2px solid #4CAF50;
+        color: #4CAF50; 
+      }
+      .waiting { 
+        background-color: rgba(255, 193, 7, 0.2); 
+        border: 2px solid #FFC107;
+        color: #FFC107; 
+      }
+      .qr-container { 
+        padding: 20px; 
+        border: 2px solid rgba(255,255,255,0.3); 
+        border-radius: 15px; 
+        margin-top: 20px; 
+        background: rgba(255,255,255,0.05);
+      }
+      .instructions {
+        margin: 20px 0;
+        padding: 15px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 10px;
+        font-size: 0.9rem;
+      }
+      .url-info {
+        margin-top: 20px;
+        padding: 15px;
+        background: rgba(0,0,0,0.2);
+        border-radius: 10px;
+        font-family: monospace;
+        font-size: 0.8rem;
+        word-break: break-all;
+      }
+      .refresh-info {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0,0,0,0.5);
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 0.8rem;
+        backdrop-filter: blur(5px);
+      }
+      @media (max-width: 600px) {
+        .container { margin: 10px; padding: 20px; }
+        body { padding: 10px; }
+      }
     </style>
     <script>
-      // Auto-refresh the QR image every 30 seconds if not connected
+      let countdown = 30;
+      
+      function updateCountdown() {
+        const element = document.getElementById('countdown');
+        if (element) {
+          element.textContent = countdown;
+          countdown--;
+          if (countdown < 0) {
+            countdown = 30;
+          }
+        }
+      }
+      
       function checkStatus() {
         fetch('/status')
           .then(response => response.json())
           .then(data => {
-            document.getElementById('status-text').textContent = data.connected ? 
-              'Connected to WhatsApp!' : 
-              'Waiting for connection... (page refreshes automatically)';
-            
-            document.getElementById('status').className = data.connected ? 
-              'status connected' : 
-              'status waiting';
+            const statusText = document.getElementById('status-text');
+            const statusDiv = document.getElementById('status');
+            const qrContainer = document.getElementById('qr-container');
             
             if (data.connected) {
-              document.getElementById('qr-container').style.display = 'none';
+              statusText.textContent = '✅ Connected to WhatsApp! Bot is running.';
+              statusDiv.className = 'status connected';
+              if (qrContainer) qrContainer.style.display = 'none';
             } else {
-              document.getElementById('qr-container').style.display = 'block';
-              // Force reload the image to get fresh QR code
-              const img = document.getElementById('qr-code');
-              img.src = '/qr?' + new Date().getTime();
+              statusText.textContent = '⏳ Waiting for WhatsApp connection...';
+              statusDiv.className = 'status waiting';
+              if (qrContainer) qrContainer.style.display = 'block';
               
-              // Refresh whole page after 30 seconds if not connected
-              setTimeout(() => { window.location.reload(); }, 30000);
+              // Update QR image with cache busting
+              const img = document.getElementById('qr-code');
+              if (img) {
+                img.src = '/qr?' + new Date().getTime();
+              }
             }
           })
           .catch(error => {
-            console.error('Error checking status:', error);
-            // In case of error, try again in 10 seconds
-            setTimeout(checkStatus, 10000);
+            console.error('Status check failed:', error);
           });
       }
       
-      // Run immediately on load
-      window.onload = checkStatus;
+      setInterval(updateCountdown, 1000);
+      setInterval(checkStatus, 5000);
+      window.onload = function() {
+        checkStatus();
+        updateCountdown();
+      };
     </script>
   </head>
   <body>
+    <div class="refresh-info">
+      Auto-refresh in: <span id="countdown">30</span>s
+    </div>
+    
     <div class="container">
-      <h1>Venille WhatsApp Bot</h1>
+      <div class="logo">🤖 Venille WhatsApp Bot</div>
+      <div class="subtitle">Menstrual & Sexual Health AI Companion</div>
+      
       <div id="status" class="status waiting">
         <p id="status-text">Checking connection status...</p>
       </div>
+      
       <div id="qr-container" class="qr-container">
-        <p>Scan this QR code with your WhatsApp app to connect:</p>
-        <img src="/qr" alt="WhatsApp QR Code" id="qr-code">
-        <p><small>This page will refresh automatically every 30 seconds until connected.</small></p>
+        <h3>📱 Connect Your WhatsApp</h3>
+        <div class="instructions">
+          <strong>How to connect:</strong><br>
+          1. Open WhatsApp on your phone<br>
+          2. Go to Settings → Linked Devices<br>
+          3. Tap "Link a Device"<br>
+          4. Scan the QR code below
+        </div>
+        <img src="/qr" alt="WhatsApp QR Code" id="qr-code" onerror="this.style.display='none'">
+        <p><small>Page refreshes automatically every 30 seconds</small></p>
+      </div>
+      
+      <div class="url-info">
+        <strong>🔗 App URL:</strong><br>
+        ${baseUrl}
       </div>
     </div>
   </body>
@@ -140,7 +276,8 @@ app.get('/status', (req, res) => {
   const status = {
     connected: isConnected,
     hasQR: !!lastQR,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    baseUrl: getBaseUrl()
   };
   
   console.log("Status endpoint accessed:", status);
@@ -149,7 +286,11 @@ app.get('/status', (req, res) => {
 
 // Add health check endpoint that Railway might use
 app.get('/health', (req, res) => {
-  res.status(200).send('OK');
+  res.status(200).json({ 
+    status: 'OK', 
+    connected: isConnected,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ───────── supabase client (for session storage) ─────────
@@ -198,6 +339,13 @@ function format(str, ...a) {
   return str.replace(/{(\d+)}/g, (_, i) => a[i] ?? _);
 }
 
+// Helper function to get strings in user's language
+function str(jid, key, ...args) {
+  const lang = getUserLangCache(jid);
+  const strings = STRINGS[lang] || STRINGS.English;
+  const template = strings[key] || STRINGS.English[key] || key;
+  return format(template, ...args);
+}
 // ---------- i18n strings (unchanged, shortened for brevity) ----------
 const STRINGS = {
   English: {
